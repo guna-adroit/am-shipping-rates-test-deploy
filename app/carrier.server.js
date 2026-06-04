@@ -29,17 +29,28 @@ const DELETE_CARRIER_SERVICE = `#graphql
   }
 `;
 
+// Query to verify the carrier service actually exists in Shopify
+const GET_CARRIER_SERVICE = `#graphql
+  query GetCarrierService($id: ID!) {
+    deliveryCarrierService(id: $id) {
+      id
+      name
+      callbackUrl
+      active
+    }
+  }
+`;
+
 /**
  * Register the carrier service.
- * If one already exists BUT the callback URL has changed (e.g. tunnel restarted
- * in dev), it deletes the stale one and creates a fresh registration.
+ * If one already exists BUT the callback URL has changed, re-registers it.
  */
 export async function registerCarrierService(admin, shopDomain) {
   const appUrl = process.env.SHOPIFY_APP_URL;
   if (!appUrl) throw new Error("SHOPIFY_APP_URL env variable is not set");
 
   const callbackUrl = `${appUrl}/carrier-service`;
-  const existing = await db.carrierService.findUnique({ where: { shopDomain } });
+  const existing    = await db.carrierService.findUnique({ where: { shopDomain } });
 
   // Already registered with the correct URL — skip
   if (existing && existing.callbackUrl === callbackUrl) {
@@ -53,35 +64,12 @@ export async function registerCarrierService(admin, shopDomain) {
     await db.carrierService.delete({ where: { shopDomain } });
   }
 
-  console.log(`[CarrierService] Registering for ${shopDomain} → ${callbackUrl}`);
-
-  const response = await admin.graphql(CREATE_CARRIER_SERVICE, {
-    variables: {
-      input: {
-        name: "Zip Code Shipping Rates",
-        callbackUrl,
-        active: true,
-        supportsServiceDiscovery: false,
-      },
-    },
-  });
-
-  const { data } = await response.json();
-  const { carrierService, userErrors } = data.carrierServiceCreate;
-
-  if (userErrors?.length > 0) {
-    const msg = userErrors.map((e) => `[${e.field}] ${e.message}`).join("; ");
-    throw new Error(msg);
-  }
-
-  return db.carrierService.create({
-    data: { shopDomain, serviceId: carrierService.id, callbackUrl },
-  });
+  return _createInShopify(admin, shopDomain, callbackUrl);
 }
 
 /**
  * Force-delete then re-create the carrier service.
- * Exposed via the "Re-register" button in the app UI.
+ * Called when merchant manually deleted it from Shopify Settings.
  */
 export async function reRegisterCarrierService(admin, shopDomain) {
   const existing = await db.carrierService.findUnique({ where: { shopDomain } });
@@ -89,23 +77,104 @@ export async function reRegisterCarrierService(admin, shopDomain) {
     await _deleteFromShopify(admin, existing.serviceId);
     await db.carrierService.delete({ where: { shopDomain } });
   }
-  return registerCarrierService(admin, shopDomain);
+  const callbackUrl = `${process.env.SHOPIFY_APP_URL}/carrier-service`;
+  return _createInShopify(admin, shopDomain, callbackUrl);
 }
 
 /**
- * Returns the registration status shown in the UI banner.
+ * Verify the carrier service actually exists in Shopify, not just in our DB.
+ * Returns { existsInShopify, shopifyRecord } 
  */
-export async function getCarrierServiceStatus(shopDomain) {
-  const record = await db.carrierService.findUnique({ where: { shopDomain } });
-  const currentUrl = `${process.env.SHOPIFY_APP_URL}/carrier-service`;
+export async function verifyCarrierServiceWithShopify(admin, shopDomain) {
+  const dbRecord = await db.carrierService.findUnique({ where: { shopDomain } });
+  if (!dbRecord) return { existsInShopify: false, dbRecord: null, shopifyRecord: null };
+
+  try {
+    const response = await admin.graphql(GET_CARRIER_SERVICE, {
+      variables: { id: dbRecord.serviceId },
+    });
+    const { data } = await response.json();
+    const shopifyRecord = data?.deliveryCarrierService ?? null;
+
+    return {
+      existsInShopify: !!shopifyRecord,
+      dbRecord,
+      shopifyRecord,
+    };
+  } catch (e) {
+    console.error("[CarrierService] Shopify verify failed:", e.message);
+    return { existsInShopify: false, dbRecord, shopifyRecord: null };
+  }
+}
+
+/**
+ * Full status object for the Settings page.
+ * Does a live Shopify API check to detect if merchant manually deleted the service.
+ */
+export async function getCarrierServiceStatusFull(admin, shopDomain) {
+  const appUrl      = process.env.SHOPIFY_APP_URL ?? "";
+  const currentUrl  = `${appUrl}/carrier-service`;
+  const { existsInShopify, dbRecord, shopifyRecord } = await verifyCarrierServiceWithShopify(admin, shopDomain);
+
+  if (!dbRecord && !existsInShopify) {
+    return {
+      status:       "not_registered",
+      label:        "Not registered",
+      description:  "The carrier service has not been registered with Shopify.",
+      callbackUrl:  currentUrl,
+      serviceId:    null,
+      urlMismatch:  false,
+      registered:   false,
+    };
+  }
+
+  if (dbRecord && !existsInShopify) {
+    return {
+      status:       "deleted_in_shopify",
+      label:        "Deleted in Shopify",
+      description:  "The carrier service was manually deleted from Shopify Settings. Click Register to restore it.",
+      callbackUrl:  currentUrl,
+      serviceId:    dbRecord.serviceId,
+      urlMismatch:  false,
+      registered:   false,
+    };
+  }
+
+  if (dbRecord?.callbackUrl !== currentUrl) {
+    return {
+      status:       "url_mismatch",
+      label:        "URL mismatch",
+      description:  `Registered URL: ${dbRecord.callbackUrl}. Current URL: ${currentUrl}. Re-register to fix.`,
+      callbackUrl:  currentUrl,
+      serviceId:    dbRecord.serviceId,
+      urlMismatch:  true,
+      registered:   true,
+    };
+  }
 
   return {
-    registered: !!record,
-    serviceId: record?.serviceId ?? null,
+    status:       "active",
+    label:        "Active",
+    description:  "The carrier service is registered and active.",
+    callbackUrl:  shopifyRecord?.callbackUrl ?? currentUrl,
+    serviceId:    dbRecord.serviceId,
+    urlMismatch:  false,
+    registered:   true,
+  };
+}
+
+/**
+ * Lightweight status check (no Shopify API call) — used on the Scenarios list page.
+ */
+export async function getCarrierServiceStatus(shopDomain) {
+  const record     = await db.carrierService.findUnique({ where: { shopDomain } });
+  const currentUrl = `${process.env.SHOPIFY_APP_URL}/carrier-service`;
+  return {
+    registered:           !!record,
+    serviceId:            record?.serviceId ?? null,
     registeredCallbackUrl: record?.callbackUrl ?? null,
-    currentCallbackUrl: currentUrl,
-    // true when tunnel changed and Shopify is calling the wrong URL
-    urlMismatch: !!record && record.callbackUrl !== currentUrl,
+    currentCallbackUrl:   currentUrl,
+    urlMismatch:          !!record && record.callbackUrl !== currentUrl,
   };
 }
 
@@ -117,6 +186,35 @@ export async function deleteCarrierService(admin, shopDomain) {
   if (!existing) return;
   await _deleteFromShopify(admin, existing.serviceId);
   await db.carrierService.delete({ where: { shopDomain } });
+}
+
+// ─── private helpers ─────────────────────────────────────────────────────────
+
+async function _createInShopify(admin, shopDomain, callbackUrl) {
+  console.log(`[CarrierService] Registering for ${shopDomain} → ${callbackUrl}`);
+
+  const response = await admin.graphql(CREATE_CARRIER_SERVICE, {
+    variables: {
+      input: {
+        name:                     "AM Shipping Rates",
+        callbackUrl,
+        active:                   true,
+        supportsServiceDiscovery: false,
+      },
+    },
+  });
+
+  const { data }                        = await response.json();
+  const { carrierService, userErrors }  = data.carrierServiceCreate;
+
+  if (userErrors?.length > 0) {
+    const msg = userErrors.map((e) => `[${e.field}] ${e.message}`).join("; ");
+    throw new Error(msg);
+  }
+
+  return db.carrierService.create({
+    data: { shopDomain, serviceId: carrierService.id, callbackUrl },
+  });
 }
 
 async function _deleteFromShopify(admin, serviceId) {

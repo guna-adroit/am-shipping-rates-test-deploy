@@ -139,34 +139,18 @@ export default function ScenariosIndexPage() {
         Create new scenario
       </s-button>
 
-      {/* ── Carrier status banners ───────────────────────────────────────── */}
-      {!carrierStatus.registered && (
-        <s-banner tone="warning" heading="Carrier service not registered">
+      {/* ── Carrier status banner — links to Settings for full management ── */}
+      {(!carrierStatus.registered || carrierStatus.urlMismatch) && (
+        <s-banner
+          tone={carrierStatus.urlMismatch ? "warning" : "critical"}
+          heading={carrierStatus.urlMismatch ? "Carrier service URL mismatch" : "Carrier service not registered"}
+        >
           <s-paragraph>
-            The shipping rate carrier service is not registered. Rates will not
-            appear at checkout.
+            {carrierStatus.urlMismatch
+              ? "Your app URL has changed — rates may not appear at checkout."
+              : "The shipping carrier service is not registered — rates will not appear at checkout."}
           </s-paragraph>
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="reregister" />
-            <s-button type="submit" {...(isReregistering ? { loading: true } : {})}>
-              Register carrier service
-            </s-button>
-          </fetcher.Form>
-        </s-banner>
-      )}
-
-      {carrierStatus.urlMismatch && (
-        <s-banner tone="warning" heading="Callback URL mismatch">
-          <s-paragraph>
-            Your app URL has changed. Current:{" "}
-            <strong>{carrierStatus.currentCallbackUrl}</strong>
-          </s-paragraph>
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="reregister" />
-            <s-button type="submit" {...(isReregistering ? { loading: true } : {})}>
-              Re-register with current URL
-            </s-button>
-          </fetcher.Form>
+          <s-link href="/app/settings">Go to Settings to register</s-link>
         </s-banner>
       )}
 
