@@ -2,7 +2,7 @@
 
 client_id = "bb6ce7bb5683c2ceb890b7209a825298"
 name = "AM Shipping Rates Test"
-application_url = "https://example.com"
+application_url = "https://am-shipping-rates-test-deploy.vercel.app"
 embedded = true
 
 [access_scopes]
@@ -10,7 +10,7 @@ embedded = true
 scopes = "read_customers,read_shipping,write_products,write_shipping"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://am-shipping-rates-test-deploy.vercel.app/api/auth" ]
 
 [webhooks]
 api_version = "2026-07"
