@@ -29,14 +29,19 @@ const DELETE_CARRIER_SERVICE = `#graphql
   }
 `;
 
-// Query to verify the carrier service actually exists in Shopify
-const GET_CARRIER_SERVICE = `#graphql
-  query GetCarrierService($id: ID!) {
-    deliveryCarrierService(id: $id) {
-      id
-      name
-      callbackUrl
-      active
+// Query to list all carrier services — used to verify ours still exists.
+// We use carrierServices (list) instead of deliveryCarrierService(id:) because
+// the by-ID query does not reliably return callbackUrl in all API versions.
+const LIST_CARRIER_SERVICES = `#graphql
+  query ListCarrierServices {
+    carrierServices(first: 20) {
+      edges {
+        node {
+          id
+          name
+          active
+        }
+      }
     }
   }
 `;
@@ -83,18 +88,19 @@ export async function reRegisterCarrierService(admin, shopDomain) {
 
 /**
  * Verify the carrier service actually exists in Shopify, not just in our DB.
- * Returns { existsInShopify, shopifyRecord } 
+ * Uses the carrier services list query and matches by ID.
  */
 export async function verifyCarrierServiceWithShopify(admin, shopDomain) {
   const dbRecord = await db.carrierService.findUnique({ where: { shopDomain } });
   if (!dbRecord) return { existsInShopify: false, dbRecord: null, shopifyRecord: null };
 
   try {
-    const response = await admin.graphql(GET_CARRIER_SERVICE, {
-      variables: { id: dbRecord.serviceId },
-    });
+    const response = await admin.graphql(LIST_CARRIER_SERVICES);
     const { data } = await response.json();
-    const shopifyRecord = data?.deliveryCarrierService ?? null;
+    const services = (data?.carrierServices?.edges ?? []).map((e) => e.node);
+    const shopifyRecord = services.find((s) => s.id === dbRecord.serviceId) ?? null;
+
+    console.log(`[CarrierService] Found ${services.length} carrier service(s) in Shopify. Our ID match: ${!!shopifyRecord}`);
 
     return {
       existsInShopify: !!shopifyRecord,

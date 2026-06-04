@@ -14,7 +14,9 @@ import {
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
   const status = await getCarrierServiceStatusFull(admin, session.shop);
-  return { status, shop: session.shop };
+  // Pass appUrl from server-side env — process.env is undefined in client-side JSX
+  const appUrl = process.env.SHOPIFY_APP_URL ?? null;
+  return { status, shop: session.shop, appUrl };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -43,7 +45,7 @@ export const action = async ({ request }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const { status, shop } = useLoaderData();
+  const { status, shop, appUrl } = useLoaderData();
   const actionData       = useActionData();
   const navigation       = useNavigation();
   const isSubmitting     = navigation.state === "submitting";
@@ -206,7 +208,7 @@ export default function SettingsPage() {
           <s-stack direction="block" gap="extra-small">
             <s-text tone="subdued" style={{ fontSize: "12px" }}>App URL</s-text>
             <s-text style={{ fontSize: "12px", wordBreak: "break-all" }}>
-              {process.env.SHOPIFY_APP_URL ?? "Not set"}
+              {appUrl ?? "Not set"}
             </s-text>
           </s-stack>
         </s-stack>
