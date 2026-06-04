@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Session {
+  id                   String    @id
+  shop                 String
+  state                String
+  isOnline             Boolean   @default(false)
+  scope                String?
+  expires              DateTime?
+  accessToken          String
+  userId               BigInt?
+  firstName            String?
+  lastName             String?
+  email                String?
+  accountOwner         Boolean   @default(false)
+  locale               String?
+  collaborator         Boolean?  @default(false)
+  emailVerified        Boolean?  @default(false)
+  refreshToken         String?
+  refreshTokenExpires  DateTime?
+}
+
+// "Zone" = "Scenario" in the UI.
+// zipCodes is retained for backward compatibility but scenarios use conditions for matching.
+model Zone {
+  id         String   @id
+  shopDomain String
+  name       String
+  zipCodes   String   @default("") @db.Text
+  // JSON: { logic: "all"|"any"|"none", rules: [{ id, category, attribute, operator, value, value2 }] }
+  conditions String?  @db.Text
+  isFallback Boolean  @default(false)
+  status     String   @default("enabled")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  rates      Rate[]
+
+  @@index([shopDomain])
+}
+
+model Rate {
+  id          String   @id
+  zoneId      String
+  zone        Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  // "price" = Cart Total, "weight" = Cart Weight (legacy + current)
+  type        String   @default("price")
+  // "fixed" = dollar amount, "percentage" = % of cart total
+  valueType   String   @default("fixed")
+  // Optional link to a Shopify DeliveryProfile
+  profileId   String?
+  profileName String?
+  status      String   @default("enabled")  // "enabled" | "disabled"
+  minValue    Float    @default(0)
+  maxValue    Float?
+  price       Float    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([zoneId])
+}
+
+model CarrierService {
+  id          String   @id @default(cuid())
+  shopDomain  String   @unique
+  serviceId   String
+  callbackUrl String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
