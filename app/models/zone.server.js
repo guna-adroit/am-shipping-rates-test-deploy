@@ -100,25 +100,44 @@ export async function createFallbackZone(shopDomain) {
  *
  * Returns { zone, isFallback: boolean } or null.
  */
+/**
+ * Returns the FIRST matching scenario (backward-compat).
+ * Prefer findAllMatchingScenarios for multi-scenario logic.
+ */
 export async function findMatchingScenario(shopDomain, cartData) {
+  const result = await findAllMatchingScenarios(shopDomain, cartData);
+  if (!result) return null;
+  return { zone: result.zones[0], isFallback: result.isFallback };
+}
+
+/**
+ * Returns ALL matching non-fallback scenarios (or the fallback if none match).
+ * Used by the carrier service to apply "highest rate wins" logic across scenarios.
+ *
+ * Returns: { zones: Zone[], isFallback: boolean } | null
+ */
+export async function findAllMatchingScenarios(shopDomain, cartData) {
   const scenarios = await db.zone.findMany({
     where: { shopDomain, status: "enabled" },
     include: { rates: { orderBy: { minValue: "asc" } } },
   });
 
-  // 1. Try regular (non-fallback) scenarios
-  const match = scenarios.find((zone) => {
+  // Collect ALL matching non-fallback scenarios
+  const matches = scenarios.filter((zone) => {
     if (zone.isFallback) return false;
     const ok = matchesScenarioConditions(zone, cartData);
     console.log(`[scenario-match] "${zone.name}": conditions=${ok}`);
     return ok;
   });
 
-  if (match) return { zone: match, isFallback: false };
+  if (matches.length > 0) {
+    console.log(`[scenario-match] ${matches.length} scenario(s) matched: ${matches.map(z => `"${z.name}"`).join(", ")}`);
+    return { zones: matches, isFallback: false };
+  }
 
-  // 2. Fallback scenario
+  // Fallback scenario
   const fallback = scenarios.find((z) => z.isFallback);
-  if (fallback) return { zone: fallback, isFallback: true };
+  if (fallback) return { zones: [fallback], isFallback: true };
 
   return null;
 }

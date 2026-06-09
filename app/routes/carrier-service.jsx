@@ -7,7 +7,7 @@
  * Body:   { rate: { origin, destination, items, currency } }
  */
 import db from "../db.server";
-import { findMatchingScenario } from "../models/zone.server";
+import { findAllMatchingScenarios } from "../models/zone.server";
 
 export const loader = async () => {
   return Response.json({ status: "Scenario-based Carrier Service active" });
@@ -135,43 +135,77 @@ export const action = async ({ request }) => {
     customer,          // null for guest checkouts
   };
 
-  // 5. Find matching scenario
-  const result = await findMatchingScenario(shopDomain, cartData);
+  // 5. Find ALL matching scenarios
+  const result = await findAllMatchingScenarios(shopDomain, cartData);
 
   if (!result) {
     console.log("[carrier] No matching scenario — returning no rates");
     return Response.json({ rates: [] });
   }
 
-  const { zone, isFallback } = result;
-  console.log(`[carrier] Matched: "${zone.name}" (${zone.rates.length} rates)${isFallback ? " [FALLBACK]" : ""}`);
+  const { zones, isFallback } = result;
+  console.log(`[carrier] ${zones.length} scenario(s) matched${isFallback ? " [FALLBACK]" : ""}: ${zones.map(z => `"${z.name}"`).join(", ")}`);
 
-  if (zone.rates.length === 0) {
-    return Response.json({ rates: [] });
-  }
+  // 6. Collect ALL applicable rates from ALL matching scenarios
+  //    "Applicable" = rate's min/max range covers the current cart value
+  //
+  //    When multiple scenarios match, we return the HIGHEST-PRICED rate
+  //    per service name — so the more specific/expensive rule always wins.
+  //    (e.g. Scenario A: Standard $20, Scenario B: Standard $30 → show $30)
 
-  // 6. Filter rates by min/max criteria and compute price
-  const matchedRates = zone.rates
-    .filter((rate) => {
+  const allRates = [];
+
+  for (const zone of zones) {
+    for (const rate of zone.rates) {
       const val = rate.type === "weight" ? totalWeightKg : totalDollars;
-      return val >= rate.minValue && (rate.maxValue == null || val <= rate.maxValue);
-    })
-    .map((rate) => {
-      // percentage rates: price is % of cart total
+      if (val < rate.minValue || (rate.maxValue != null && val > rate.maxValue)) {
+        continue; // rate's range doesn't cover this cart
+      }
+
       const dollarPrice = rate.valueType === "percentage"
         ? totalDollars * (rate.price / 100)
         : rate.price;
-      return {
-        service_name:      rate.name,
-        service_code:      `scenario_rate_${rate.id}`,
-        total_price:       Math.round(dollarPrice * 100).toString(),
-        description:       rate.description ?? "",
-        currency,
-        min_delivery_date: null,
-        max_delivery_date: null,
-      };
-    });
 
-  console.log(`[carrier] Returning ${matchedRates.length} rate(s)`);
-  return Response.json({ rates: matchedRates });
+      allRates.push({
+        service_name: rate.name,
+        service_code: `scenario_rate_${rate.id}`,
+        total_price:  Math.round(dollarPrice * 100),   // keep as number for comparison
+        description:  rate.description ?? "",
+        scenario:     zone.name,
+      });
+    }
+  }
+
+  if (allRates.length === 0) {
+    console.log("[carrier] No rates match the cart criteria");
+    return Response.json({ rates: [] });
+  }
+
+  // Per service_name: keep only the HIGHEST total_price across all matching scenarios
+  const highestByName = new Map();
+  for (const rate of allRates) {
+    const existing = highestByName.get(rate.service_name);
+    if (!existing || rate.total_price > existing.total_price) {
+      highestByName.set(rate.service_name, rate);
+    }
+  }
+
+  const finalRates = [...highestByName.values()].map((rate) => ({
+    service_name:      rate.service_name,
+    service_code:      rate.service_code,
+    total_price:       rate.total_price.toString(),
+    description:       rate.description,
+    currency,
+    min_delivery_date: null,
+    max_delivery_date: null,
+  }));
+
+  if (zones.length > 1) {
+    for (const [name, rate] of highestByName) {
+      console.log(`[carrier] "${name}": highest rate = $${(rate.total_price / 100).toFixed(2)} (from scenario "${rate.scenario}")`);
+    }
+  }
+
+  console.log(`[carrier] Returning ${finalRates.length} rate(s)`);
+  return Response.json({ rates: finalRates });
 };
