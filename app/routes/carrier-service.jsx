@@ -48,6 +48,8 @@ export const action = async ({ request }) => {
   const rateRequest = body?.rate;
   if (!rateRequest) return Response.json({ rates: [] });
 
+  const t0 = Date.now(); // ← total request timer
+
   const destination    = rateRequest.destination ?? {};
   const zip            = (destination.postal_code ?? "").trim();
   const currency       = rateRequest.currency || "AUD";
@@ -62,6 +64,7 @@ export const action = async ({ request }) => {
   // customer from the Admin API for accurate, up-to-date data.
   let customer = null;
   if (customerRaw?.id) {
+    const tCustomer = Date.now();
     try {
       // Find the offline session access token for this shop.
       // Offline sessions (isOnline: false) have permanent access tokens — use these
@@ -107,6 +110,7 @@ export const action = async ({ request }) => {
     } catch (e) {
       console.error(`[carrier] Failed to fetch customer ${customerRaw.id}: ${e.message}`);
     }
+    console.log(`[carrier] Customer fetch: ${Date.now() - tCustomer}ms`);
 
     // Fallback: if API fetch failed, use what the carrier request provided
     if (!customer && customerRaw) {
@@ -135,11 +139,14 @@ export const action = async ({ request }) => {
     customer,          // null for guest checkouts
   };
 
+  const tScenario = Date.now();
   // 5. Find ALL matching scenarios
   const result = await findAllMatchingScenarios(shopDomain, cartData);
+  console.log(`[carrier] Scenario matching: ${Date.now() - tScenario}ms`);
 
   if (!result) {
     console.log("[carrier] No matching scenario — returning no rates");
+    console.log(`[carrier] ✓ Total response time: ${Date.now() - t0}ms`);
     return Response.json({ rates: [] });
   }
 
@@ -178,6 +185,7 @@ export const action = async ({ request }) => {
 
   if (allRates.length === 0) {
     console.log("[carrier] No rates match the cart criteria");
+    console.log(`[carrier] ✓ Total response time: ${Date.now() - t0}ms`);
     return Response.json({ rates: [] });
   }
 
@@ -207,5 +215,6 @@ export const action = async ({ request }) => {
   }
 
   console.log(`[carrier] Returning ${finalRates.length} rate(s)`);
+  console.log(`[carrier] ✓ Total response time: ${Date.now() - t0}ms`);
   return Response.json({ rates: finalRates });
 };
