@@ -189,30 +189,27 @@ export const action = async ({ request }) => {
     return Response.json({ rates: [] });
   }
 
-  // Per service_name: keep only the HIGHEST total_price across all matching scenarios
-  const highestByName = new Map();
-  for (const rate of allRates) {
-    const existing = highestByName.get(rate.service_name);
-    if (!existing || rate.total_price > existing.total_price) {
-      highestByName.set(rate.service_name, rate);
-    }
-  }
+  // When multiple scenarios match, return ONLY the single highest-priced rate.
+  // This ensures the most expensive applicable rate always wins.
+  const highestRate = allRates.reduce((best, rate) =>
+    rate.total_price > best.total_price ? rate : best
+  );
 
-  const finalRates = [...highestByName.values()].map((rate) => ({
-    service_name:      rate.service_name,
-    service_code:      rate.service_code,
-    total_price:       rate.total_price.toString(),
-    description:       rate.description,
+  console.log(
+    `[carrier] Highest rate: "${highestRate.service_name}" ` +
+    `$${(highestRate.total_price / 100).toFixed(2)} ` +
+    `(from scenario "${highestRate.scenario}")`
+  );
+
+  const finalRates = [{
+    service_name:      highestRate.service_name,
+    service_code:      highestRate.service_code,
+    total_price:       highestRate.total_price.toString(),
+    description:       highestRate.description,
     currency,
     min_delivery_date: null,
     max_delivery_date: null,
-  }));
-
-  if (zones.length > 1) {
-    for (const [name, rate] of highestByName) {
-      console.log(`[carrier] "${name}": highest rate = $${(rate.total_price / 100).toFixed(2)} (from scenario "${rate.scenario}")`);
-    }
-  }
+  }];
 
   console.log(`[carrier] Returning ${finalRates.length} rate(s)`);
   console.log(`[carrier] ✓ Total response time: ${Date.now() - t0}ms`);
