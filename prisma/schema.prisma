@@ -62,8 +62,10 @@ model Rate {
   status      String   @default("enabled")  // "enabled" | "disabled"
   minValue    Float    @default(0)
   maxValue    Float?
-  price       Float    @default(0)
-  createdAt   DateTime @default(now())
+  price            Float    @default(0)
+  minDeliveryDays  Int?                   // minimum delivery days shown at checkout
+  maxDeliveryDays  Int?                   // maximum delivery days shown at checkout
+  createdAt        DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([zoneId])

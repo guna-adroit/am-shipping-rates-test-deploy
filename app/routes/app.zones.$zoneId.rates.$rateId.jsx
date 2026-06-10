@@ -85,7 +85,9 @@ export const action = async ({ request, params }) => {
   const description = formData.get("description")?.toString().trim() ?? "";
   const type        = formData.get("type")?.toString() ?? "price";
   const valueType   = formData.get("valueType")?.toString() ?? "fixed";
-  const rateStatus  = formData.get("rateStatus")?.toString() ?? "enabled";
+  const rateStatus      = formData.get("rateStatus")?.toString() ?? "enabled";
+  const minDeliveryDays = formData.get("minDeliveryDays")?.toString() || null;
+  const maxDeliveryDays = formData.get("maxDeliveryDays")?.toString() || null;
   const origName    = formData.get("origName")?.toString() ?? name;
   const tiersJson   = formData.get("tiersJson")?.toString() ?? "[]";
 
@@ -113,7 +115,7 @@ export const action = async ({ request, params }) => {
   // Update or create
   for (const tier of tiers) {
     const payload = {
-      name, description, type, valueType,
+      name, description, type, valueType, minDeliveryDays, maxDeliveryDays,
       minValue: parseFloat(tier.min) || 0,
       maxValue: !tier.max || tier.max === "~" ? null : parseFloat(tier.max),
       price: parseFloat(tier.price) || 0,
@@ -162,10 +164,12 @@ export default function EditRatePage() {
   // modalTiers = working copy inside the modal
   const [modalTiers, setModalTiers] = useState([]);
 
-  const nameRef = useRef(null);
-  const descRef = useRef(null);
-  const catRef  = useRef(null);
-  const attrRef = useRef(null);
+  const nameRef    = useRef(null);
+  const descRef    = useRef(null);
+  const minDaysRef = useRef(null);
+  const maxDaysRef = useRef(null);
+  const catRef     = useRef(null);
+  const attrRef    = useRef(null);
 
   const rateType    = getAttrMeta(rateCat, rateAttr)?.type   ?? "price";
   const unitSuffix  = getAttrMeta(rateCat, rateAttr)?.suffix ?? "";
@@ -174,6 +178,8 @@ export default function EditRatePage() {
   useEffect(() => {
     if (nameRef.current) nameRef.current.value = rate.name;
     if (descRef.current) descRef.current.value = rate.description ?? "";
+    if (minDaysRef.current) minDaysRef.current.value = rate.minDeliveryDays != null ? String(rate.minDeliveryDays) : "";
+    if (maxDaysRef.current) maxDaysRef.current.value = rate.maxDeliveryDays != null ? String(rate.maxDeliveryDays) : "";
     const sel = typeToSelectors(rate.type);
     setTimeout(() => {
       if (catRef.current)  catRef.current.value  = sel.cat;
@@ -196,6 +202,8 @@ export default function EditRatePage() {
   const handleDiscard = useCallback(() => {
     if (nameRef.current) nameRef.current.value = rate.name;
     if (descRef.current) descRef.current.value = rate.description ?? "";
+    if (minDaysRef.current) minDaysRef.current.value = rate.minDeliveryDays != null ? String(rate.minDeliveryDays) : "";
+    if (maxDaysRef.current) maxDaysRef.current.value = rate.maxDeliveryDays != null ? String(rate.maxDeliveryDays) : "";
     setSavedTiers(allTiers.map((t) => ({
       id: generateId(), rateId: t.id,
       min: String(t.minValue ?? ""), max: t.maxValue != null ? String(t.maxValue) : "",
@@ -269,6 +277,36 @@ export default function EditRatePage() {
                 onInput={markChanged} required></s-text-field>
               <s-text-area ref={descRef} label="Rate description" name="description"
                 rows="2" onInput={markChanged}></s-text-area>
+
+              {/* ── Delivery time range ── */}
+              <s-stack direction="block" gap="extra-small">
+                <s-text><strong>Delivery time range (optional)</strong></s-text>
+                <s-stack direction="inline" gap="small">
+                  <s-number-field
+                    ref={minDaysRef}
+                    label="Min"
+                    name="minDeliveryDays"
+                    min="0"
+                    step="1"
+                    placeholder="e.g. 1"
+                    suffix="days"
+                    onInput={markChanged}
+                    style={{ flex: 1 }}
+                  ></s-number-field>
+                  <s-number-field
+                    ref={maxDaysRef}
+                    label="Max"
+                    name="maxDeliveryDays"
+                    min="0"
+                    step="1"
+                    placeholder="e.g. 3"
+                    suffix="days"
+                    onInput={markChanged}
+                    style={{ flex: 1 }}
+                  ></s-number-field>
+                </s-stack>
+                <s-text tone="subdued">Delivery time shown to customers at checkout.</s-text>
+              </s-stack>
             </s-stack>
           </s-section>
 

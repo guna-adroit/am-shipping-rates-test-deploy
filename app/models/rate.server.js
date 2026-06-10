@@ -29,7 +29,9 @@ export async function createRate(zoneId, data) {
       minValue:    parseFloat(data.minValue) || 0,
       maxValue:    data.maxValue !== "" && data.maxValue != null
         ? parseFloat(data.maxValue) : null,
-      price: parseFloat(data.price) || 0,
+      price:           parseFloat(data.price) || 0,
+      minDeliveryDays: data.minDeliveryDays != null && data.minDeliveryDays !== "" ? parseInt(data.minDeliveryDays, 10) : null,
+      maxDeliveryDays: data.maxDeliveryDays != null && data.maxDeliveryDays !== "" ? parseInt(data.maxDeliveryDays, 10) : null,
     },
   });
 }
@@ -48,8 +50,10 @@ export async function updateRate(id, data) {
       minValue:    parseFloat(data.minValue) || 0,
       maxValue:    data.maxValue !== "" && data.maxValue != null
         ? parseFloat(data.maxValue) : null,
-      price:       parseFloat(data.price) || 0,
-      updatedAt:   new Date(),
+      price:           parseFloat(data.price) || 0,
+      minDeliveryDays: data.minDeliveryDays != null && data.minDeliveryDays !== "" ? parseInt(data.minDeliveryDays, 10) : null,
+      maxDeliveryDays: data.maxDeliveryDays != null && data.maxDeliveryDays !== "" ? parseInt(data.maxDeliveryDays, 10) : null,
+      updatedAt:       new Date(),
     },
   });
 }

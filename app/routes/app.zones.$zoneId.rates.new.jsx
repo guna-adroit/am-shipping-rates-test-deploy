@@ -52,7 +52,9 @@ export const action = async ({ request, params }) => {
   const valueType   = formData.get("valueType")?.toString() ?? "fixed";
   const profileId   = formData.get("profileId")?.toString()   || null;
   const profileName = formData.get("profileName")?.toString() || null;
-  const rateStatus  = formData.get("rateStatus")?.toString() ?? "enabled";
+  const rateStatus      = formData.get("rateStatus")?.toString() ?? "enabled";
+  const minDeliveryDays = formData.get("minDeliveryDays")?.toString() || null;
+  const maxDeliveryDays = formData.get("maxDeliveryDays")?.toString() || null;
   const tiersJson   = formData.get("tiersJson")?.toString()   ?? "[]";
 
   const errors = {};
@@ -74,6 +76,7 @@ export const action = async ({ request, params }) => {
     await createRate(params.zoneId, {
       name, description, type, valueType, profileId, profileName,
       status: rateStatus,
+      minDeliveryDays, maxDeliveryDays,
       minValue: parseFloat(tier.min) || 0,
       maxValue: !tier.max || tier.max === "~" ? null : parseFloat(tier.max),
       price: parseFloat(tier.price) || 0,
@@ -103,10 +106,12 @@ export default function NewRatePage() {
   // modalTiers = working copy inside the modal
   const [modalTiers, setModalTiers] = useState([]);
 
-  const nameRef = useRef(null);
-  const descRef = useRef(null);
-  const catRef  = useRef(null);
-  const attrRef = useRef(null);
+  const nameRef    = useRef(null);
+  const descRef    = useRef(null);
+  const minDaysRef = useRef(null);
+  const maxDaysRef = useRef(null);
+  const catRef     = useRef(null);
+  const attrRef    = useRef(null);
 
   const rateType    = getAttrMeta(rateCat, rateAttr)?.type   ?? "price";
   const unitSuffix  = getAttrMeta(rateCat, rateAttr)?.suffix ?? "";
@@ -189,6 +194,34 @@ export default function NewRatePage() {
                 help-text="Displayed to customers at checkout." required></s-text-field>
               <s-text-area ref={descRef} label="Description (optional)" name="description"
                 rows="2" placeholder="Appears below the shipping rate name at checkout."></s-text-area>
+
+              {/* ── Delivery time range ── */}
+              <s-stack direction="block" gap="extra-small">
+                <s-text><strong>Delivery time range (optional)</strong></s-text>
+                <s-stack direction="inline" gap="small">
+                  <s-number-field
+                    ref={minDaysRef}
+                    label="Min"
+                    name="minDeliveryDays"
+                    min="0"
+                    step="1"
+                    placeholder="e.g. 1"
+                    suffix="days"
+                    style={{ flex: 1 }}
+                  ></s-number-field>
+                  <s-number-field
+                    ref={maxDaysRef}
+                    label="Max"
+                    name="maxDeliveryDays"
+                    min="0"
+                    step="1"
+                    placeholder="e.g. 3"
+                    suffix="days"
+                    style={{ flex: 1 }}
+                  ></s-number-field>
+                </s-stack>
+                <s-text tone="subdued">Delivery time shown to customers at checkout.</s-text>
+              </s-stack>
             </s-stack>
           </s-section>
 

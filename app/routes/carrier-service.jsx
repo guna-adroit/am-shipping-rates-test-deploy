@@ -48,7 +48,7 @@ export const action = async ({ request }) => {
   const rateRequest = body?.rate;
   if (!rateRequest) return Response.json({ rates: [] });
 
-  const t0 = Date.now(); // ← total request timer
+  const t0 = Date.now();
 
   const destination    = rateRequest.destination ?? {};
   const zip            = (destination.postal_code ?? "").trim();
@@ -110,6 +110,7 @@ export const action = async ({ request }) => {
     } catch (e) {
       console.error(`[carrier] Failed to fetch customer ${customerRaw.id}: ${e.message}`);
     }
+
     console.log(`[carrier] Customer fetch: ${Date.now() - tCustomer}ms`);
 
     // Fallback: if API fetch failed, use what the carrier request provided
@@ -139,8 +140,8 @@ export const action = async ({ request }) => {
     customer,          // null for guest checkouts
   };
 
-  const tScenario = Date.now();
   // 5. Find ALL matching scenarios
+  const tScenario = Date.now();
   const result = await findAllMatchingScenarios(shopDomain, cartData);
   console.log(`[carrier] Scenario matching: ${Date.now() - tScenario}ms`);
 
@@ -153,32 +154,40 @@ export const action = async ({ request }) => {
   const { zones, isFallback } = result;
   console.log(`[carrier] ${zones.length} scenario(s) matched${isFallback ? " [FALLBACK]" : ""}: ${zones.map(z => `"${z.name}"`).join(", ")}`);
 
-  // 6. Collect ALL applicable rates from ALL matching scenarios
-  //    "Applicable" = rate's min/max range covers the current cart value
-  //
-  //    When multiple scenarios match, we return the HIGHEST-PRICED rate
-  //    per service name — so the more specific/expensive rule always wins.
-  //    (e.g. Scenario A: Standard $20, Scenario B: Standard $30 → show $30)
-
+  // 6. Collect ALL applicable rates from ALL matching scenarios.
+  //    When multiple scenarios match, return the HIGHEST-PRICED rate.
   const allRates = [];
 
   for (const zone of zones) {
     for (const rate of zone.rates) {
       const val = rate.type === "weight" ? totalWeightKg : totalDollars;
-      if (val < rate.minValue || (rate.maxValue != null && val > rate.maxValue)) {
-        continue; // rate's range doesn't cover this cart
-      }
+      if (val < rate.minValue || (rate.maxValue != null && val > rate.maxValue)) continue;
 
       const dollarPrice = rate.valueType === "percentage"
         ? totalDollars * (rate.price / 100)
         : rate.price;
 
+      // Build delivery text: "Delivered in X to Y days" or "Delivered in X days"
+      let deliveryText = "";
+      if (rate.minDeliveryDays != null && rate.maxDeliveryDays != null) {
+        deliveryText = `Delivered in ${rate.minDeliveryDays} to ${rate.maxDeliveryDays} days`;
+      } else if (rate.minDeliveryDays != null) {
+        deliveryText = `Delivered in ${rate.minDeliveryDays} days`;
+      } else if (rate.maxDeliveryDays != null) {
+        deliveryText = `Delivered in up to ${rate.maxDeliveryDays} days`;
+      }
+
+      // Combine merchant description + delivery text (separated by space if both exist)
+      const description = [rate.description, deliveryText].filter(Boolean).join(" · ");
+
       allRates.push({
-        service_name: rate.name,
-        service_code: `scenario_rate_${rate.id}`,
-        total_price:  Math.round(dollarPrice * 100),   // keep as number for comparison
-        description:  rate.description ?? "",
-        scenario:     zone.name,
+        service_name:      rate.name,
+        service_code:      `scenario_rate_${rate.id}`,
+        total_price:       Math.round(dollarPrice * 100),
+        description,
+        scenario:          zone.name,
+        min_delivery_date: null,   // using description text instead of exact dates
+        max_delivery_date: null,
       });
     }
   }
@@ -189,10 +198,9 @@ export const action = async ({ request }) => {
     return Response.json({ rates: [] });
   }
 
-  // When multiple scenarios match, return ONLY the single highest-priced rate.
-  // This ensures the most expensive applicable rate always wins.
-  const highestRate = allRates.reduce((best, rate) =>
-    rate.total_price > best.total_price ? rate : best
+  // Pick the single highest-priced rate across all matching scenarios
+  const highestRate = allRates.reduce((best, r) =>
+    r.total_price > best.total_price ? r : best
   );
 
   console.log(
@@ -207,8 +215,8 @@ export const action = async ({ request }) => {
     total_price:       highestRate.total_price.toString(),
     description:       highestRate.description,
     currency,
-    min_delivery_date: null,
-    max_delivery_date: null,
+    min_delivery_date: highestRate.min_delivery_date,
+    max_delivery_date: highestRate.max_delivery_date,
   }];
 
   console.log(`[carrier] Returning ${finalRates.length} rate(s)`);
