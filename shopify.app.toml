@@ -2,7 +2,7 @@
 
 client_id = "4a6c2ba800293a5c941acc62a6ca810f"
 name = "AM-Shipping-rates"
-application_url = "https://am-shipping-rates-test-deploy.vercel.app"
+application_url = "https://am-shipping-rates-test-deploy.vercel.app/app"
 embedded = true
 
 [build]
@@ -10,7 +10,7 @@ automatically_update_urls_on_dev = true
 include_config_on_deploy = true
 
 [webhooks]
-api_version = "2026-07"
+api_version = "2026-07" 
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes

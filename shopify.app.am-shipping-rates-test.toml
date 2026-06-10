@@ -2,7 +2,7 @@
 
 client_id = "bb6ce7bb5683c2ceb890b7209a825298"
 name = "AM Shipping Rates Test"
-application_url = "https://am-shipping-rates-test-deploy.vercel.app"
+application_url = "https://am-shipping-rates-test-deploy.vercel.app/app"
 embedded = true
 
 [access_scopes]
