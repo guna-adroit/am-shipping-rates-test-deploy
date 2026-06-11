@@ -218,7 +218,7 @@ export const action = async ({ request }) => {
     min_delivery_date: highestRate.min_delivery_date,
     max_delivery_date: highestRate.max_delivery_date,
   }];
-
+   
   console.log(`[carrier] Returning ${finalRates.length} rate(s)`);
   console.log(`[carrier] ✓ Total response time: ${Date.now() - t0}ms`);
   return Response.json({ rates: finalRates });
