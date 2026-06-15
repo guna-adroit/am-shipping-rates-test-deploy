@@ -429,7 +429,7 @@ export default function EditScenarioPage() {
         Save
       </s-button>
       <s-link slot="secondary-actions" href="/app/zones">Cancel</s-link>
-      <s-button slot="secondary-actions" tone="critical" variant="primary" commandFor="delete-scenario-modal">
+      <s-button slot="primary-action" tone="critical" variant="primary" commandFor="delete-scenario-modal">
         Delete scenario
       </s-button>
 
