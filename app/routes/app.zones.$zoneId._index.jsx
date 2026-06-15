@@ -429,7 +429,7 @@ export default function EditScenarioPage() {
         Save
       </s-button>
       <s-link slot="secondary-actions" href="/app/zones">Cancel</s-link>
-      <s-button slot="primary-action" tone="critical" variant="primary" commandFor="delete-scenario-modal">
+      <s-button slot="secondary-actions" tone="critical" variant="primary" commandFor="delete-scenario-modal">
         Delete scenario
       </s-button>
 
@@ -636,7 +636,7 @@ export default function EditScenarioPage() {
         <s-paragraph>
           This will permanently delete the scenario and all its rates. This cannot be undone.
         </s-paragraph>
-        <s-button slot="primary-action" tone="critical"
+        <s-button slot="primary-action" variant="primary" tone="critical"
           onClick={() => document.getElementById(DEL_FORM_ID)?.requestSubmit()}>
           Delete
         </s-button>

@@ -255,7 +255,7 @@ export default function EditRatePage() {
         Save
       </s-button>
       <s-link slot="secondary-actions" href={`/app/zones/${zone.id}`}>Cancel</s-link>
-      <s-button slot="primary-action" tone="critical" commandFor="delete-group-modal">
+      <s-button slot="secondary-actions" tone="critical" commandFor="delete-group-modal">
         Delete rate
       </s-button>
 
