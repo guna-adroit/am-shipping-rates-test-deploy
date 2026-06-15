@@ -422,7 +422,7 @@ export default function EditRatePage() {
         <s-paragraph>
           This will delete all {allTiers.length} tier{allTiers.length !== 1 ? "s" : ""} for this rate. This cannot be undone.
         </s-paragraph>
-        <s-button slot="primary-action" tone="critical"
+        <s-button slot="primary-action" variant="primary" tone="critical"
           onClick={() => document.getElementById(DEL_FORM_ID)?.requestSubmit()}>
           Delete all tiers
         </s-button>
