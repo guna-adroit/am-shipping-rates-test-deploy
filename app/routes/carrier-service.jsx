@@ -13,8 +13,17 @@ import { getCarrier } from "../carriers/definitions";
 import { fetchRates as fetchLiveCarrierRates } from "../carriers/index.server";
 
 /**
- * Fetches the shop's primary fulfillment location address, used as the
- * "origin" for live carrier rate requests. Returns null if unavailable.
+ * Resolves the "origin" address for live carrier rate requests.
+ *
+ * A shop can have multiple Locations (Settings → Locations) — POS-only
+ * locations, warehouses, etc. — so we can't just grab the first one.
+ * Priority:
+ *   1) The location that actually fulfills online orders (fulfillsOnlineOrders)
+ *      and has a complete address — this is the one checkout ships from.
+ *   2) Any other location with a complete address, as a fallback.
+ *   3) The shop's general Store details address (Settings → General —
+ *      `shop.billingAddress`, the Admin API equivalent of the Liquid
+ *      `shop.address` fields: https://shopify.dev/docs/api/liquid/objects/shop).
  */
 async function getShopOriginAddress(shopDomain) {
   try {
@@ -34,20 +43,58 @@ async function getShopOriginAddress(shopDomain) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        query: `{ locations(first: 1) { edges { node { address { zip countryCode } } } } }`,
+        query: `{
+          shop {
+            billingAddress { zip countryCodeV2 }
+          }
+          locations(first: 20) {
+            edges {
+              node {
+                name
+                isActive
+                fulfillsOnlineOrders
+                address { zip countryCode }
+              }
+            }
+          }
+        }`,
       }),
     });
     if (!resp.ok) {
-      console.warn(`[carrier:live] Locations query failed: HTTP ${resp.status}`);
+      console.warn(`[carrier:live] Shop/location address query failed: HTTP ${resp.status}`);
       return null;
     }
     const json = await resp.json();
-    const address = json?.data?.locations?.edges?.[0]?.node?.address;
-    if (!address?.zip || !address?.countryCode) {
-      console.warn(`[carrier:live] Shop location has no zip/countryCode set — live rates need a complete origin address`);
-      return null;
+    if (json.errors) {
+      console.warn(`[carrier:live] Shop/location address query errors: ${JSON.stringify(json.errors)}`);
     }
-    return { postalCode: address.zip, countryCode: address.countryCode };
+
+    const locations = (json?.data?.locations?.edges ?? []).map((e) => e.node);
+    const hasAddress = (loc) => loc?.address?.zip && loc?.address?.countryCode;
+
+    // 1) The location that fulfills online orders, if it has a complete address.
+    const fulfillmentLocation = locations.find((loc) => loc.isActive && loc.fulfillsOnlineOrders && hasAddress(loc));
+    if (fulfillmentLocation) {
+      console.log(`[carrier:live] Using origin from location "${fulfillmentLocation.name}" (fulfills online orders): ${fulfillmentLocation.address.zip}, ${fulfillmentLocation.address.countryCode}`);
+      return { postalCode: fulfillmentLocation.address.zip, countryCode: fulfillmentLocation.address.countryCode };
+    }
+
+    // 2) Any other active location with a complete address.
+    const anyLocation = locations.find((loc) => loc.isActive && hasAddress(loc));
+    if (anyLocation) {
+      console.log(`[carrier:live] Using origin from location "${anyLocation.name}" (fallback — no location is flagged as fulfilling online orders): ${anyLocation.address.zip}, ${anyLocation.address.countryCode}`);
+      return { postalCode: anyLocation.address.zip, countryCode: anyLocation.address.countryCode };
+    }
+
+    // 3) Settings → General store address.
+    const shopAddress = json?.data?.shop?.billingAddress;
+    if (shopAddress?.zip && shopAddress?.countryCodeV2) {
+      console.log(`[carrier:live] Using shop store address as origin (fallback — no location has a complete address): ${shopAddress.zip}, ${shopAddress.countryCodeV2}`);
+      return { postalCode: shopAddress.zip, countryCode: shopAddress.countryCodeV2 };
+    }
+
+    console.warn(`[carrier:live] No location or store address has a zip/country set — live rates need a complete origin address. Set one under Settings → Locations, or Settings → General → Store details.`);
+    return null;
   } catch (e) {
     console.error(`[carrier] Failed to fetch shop origin address: ${e.message}`);
     return null;
