@@ -20,7 +20,10 @@ async function generateZoneId() {
 export async function getZones(shopDomain) {
   return db.zone.findMany({
     where: { shopDomain },
-    include: { rates: { orderBy: { createdAt: "asc" } } },
+    include: {
+      rates: { orderBy: { createdAt: "asc" } },
+      liveCarrierRates: { orderBy: { createdAt: "asc" } },
+    },
     orderBy: { createdAt: "desc" },
   });
 }
@@ -28,7 +31,10 @@ export async function getZones(shopDomain) {
 export async function getZone(id, shopDomain) {
   return db.zone.findFirst({
     where: { id, shopDomain },
-    include: { rates: { orderBy: { createdAt: "asc" } } },
+    include: {
+      rates: { orderBy: { createdAt: "asc" } },
+      liveCarrierRates: { orderBy: { createdAt: "asc" } },
+    },
   });
 }
 
@@ -119,7 +125,10 @@ export async function findMatchingScenario(shopDomain, cartData) {
 export async function findAllMatchingScenarios(shopDomain, cartData) {
   const scenarios = await db.zone.findMany({
     where: { shopDomain, status: "enabled" },
-    include: { rates: { orderBy: { minValue: "asc" } } },
+    include: {
+      rates: { orderBy: { minValue: "asc" } },
+      liveCarrierRates: { where: { status: "enabled" }, orderBy: { createdAt: "asc" } },
+    },
   });
 
   // Collect ALL matching non-fallback scenarios

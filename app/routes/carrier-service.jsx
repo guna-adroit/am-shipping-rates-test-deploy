@@ -8,6 +8,109 @@
  */
 import db from "../db.server";
 import { findAllMatchingScenarios } from "../models/zone.server";
+import { getCarrierCredential } from "../models/liveCarrierRate.server";
+import { getCarrier } from "../carriers/definitions";
+import { fetchRates as fetchLiveCarrierRates } from "../carriers/index.server";
+
+/**
+ * Fetches the shop's primary fulfillment location address, used as the
+ * "origin" for live carrier rate requests. Returns null if unavailable.
+ */
+async function getShopOriginAddress(shopDomain) {
+  try {
+    const session = await db.session.findFirst({
+      where: { shop: shopDomain, isOnline: false },
+      select: { accessToken: true },
+    });
+    if (!session?.accessToken) return null;
+
+    const resp = await fetch(`https://${shopDomain}/admin/api/2024-01/graphql.json`, {
+      method: "POST",
+      headers: {
+        "X-Shopify-Access-Token": session.accessToken,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: `{ locations(first: 1) { edges { node { address { zip countryCode } } } } }`,
+      }),
+    });
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    const address = json?.data?.locations?.edges?.[0]?.node?.address;
+    if (!address?.zip || !address?.countryCode) return null;
+    return { postalCode: address.zip, countryCode: address.countryCode };
+  } catch (e) {
+    console.error(`[carrier] Failed to fetch shop origin address: ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * Resolves live carrier rates for a zone into carrier-service rate entries.
+ * Falls back to the merchant-configured flat fallback rate if the carrier
+ * call fails, times out, or isn't implemented for that carrier yet.
+ */
+async function resolveLiveCarrierRates(shopDomain, zone, cartData, currency) {
+  const results = [];
+  const origin = await getShopOriginAddress(shopDomain);
+  const destinationZip = (cartData.destination?.postal_code ?? "").trim();
+  const destinationCountry = cartData.destination?.country_code ?? "US";
+  const weightLb = cartData.totalWeightKg * 2.20462;
+
+  for (const liveRate of zone.liveCarrierRates ?? []) {
+    const carrier = getCarrier(liveRate.carrierKey);
+    let services = [];
+    try { services = JSON.parse(liveRate.services || "[]"); } catch { /* ignore */ }
+    const serviceCodes = (carrier?.serviceCodeMap && services.length > 0)
+      ? services.map((s) => carrier.serviceCodeMap[s]).filter(Boolean)
+      : undefined;
+
+    let quotes = null;
+    if (origin && destinationZip) {
+      try {
+        const credRecord = await getCarrierCredential(shopDomain, liveRate.carrierKey);
+        if (credRecord) {
+          const credentials = JSON.parse(credRecord.credentials);
+          quotes = await fetchLiveCarrierRates(liveRate.carrierKey, credentials, {
+            origin,
+            destination: { postalCode: destinationZip, countryCode: destinationCountry },
+            weightLb,
+            serviceCodes,
+          });
+        }
+      } catch (e) {
+        console.error(`[carrier] Live rate fetch failed for ${liveRate.carrierKey}: ${e.message}`);
+      }
+    }
+
+    if (quotes && quotes.length > 0) {
+      for (const q of quotes) {
+        results.push({
+          service_name: q.serviceName,
+          service_code: `live_${liveRate.carrierKey}_${q.serviceCode}`,
+          total_price: Math.round(q.amount * 100),
+          description: liveRate.notes || "",
+          scenario: zone.name,
+          min_delivery_date: null,
+          max_delivery_date: null,
+        });
+      }
+    } else {
+      // No live quotes — use the configured fallback rate.
+      results.push({
+        service_name: liveRate.fallbackName || liveRate.name,
+        service_code: `live_${liveRate.carrierKey}_fallback_${liveRate.id}`,
+        total_price: Math.round((liveRate.fallbackRate || 0) * 100),
+        description: liveRate.fallbackDescription || "",
+        scenario: zone.name,
+        min_delivery_date: null,
+        max_delivery_date: null,
+      });
+    }
+  }
+
+  return results;
+}
 
 export const loader = async () => {
   return Response.json({ status: "Scenario-based Carrier Service active" });
@@ -159,6 +262,10 @@ export const action = async ({ request }) => {
   const allRates = [];
 
   for (const zone of zones) {
+    if (zone.liveCarrierRates?.length > 0) {
+      const liveResults = await resolveLiveCarrierRates(shopDomain, zone, cartData, currency);
+      allRates.push(...liveResults);
+    }
     for (const rate of zone.rates) {
       const val = rate.type === "weight" ? totalWeightKg : totalDollars;
       if (val < rate.minValue || (rate.maxValue != null && val > rate.maxValue)) continue;

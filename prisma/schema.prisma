@@ -42,6 +42,7 @@ model Zone {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   rates      Rate[]
+  liveCarrierRates LiveCarrierRate[]
 
   @@index([shopDomain])
 }
@@ -78,4 +79,52 @@ model CarrierService {
   callbackUrl String   @default("")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// Stores merchant-entered API credentials for a live carrier (FedEx, UPS, etc.)
+// One row per shop + carrier. `credentials` is a JSON blob whose shape depends
+// on the carrier (see app/carriers/definitions.js).
+model CarrierCredential {
+  id           String   @id @default(cuid())
+  shopDomain   String
+  carrierKey   String   // "fedex" | "ups" | "dhl_express" | "usps" | "canada_post" | "sendle" | "auspost_eparcel" | "auspost_pac"
+  credentials  String   @db.Text // JSON string
+  status       String   @default("unverified") // "unverified" | "verified" | "failed"
+  lastSyncedAt DateTime?
+  lastError    String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([shopDomain, carrierKey])
+  @@index([shopDomain])
+}
+
+// A "Live carrier" rate config attached to a Zone/Scenario.
+// Unlike Rate (fixed/tiered), this calls out to the carrier's API at checkout
+// to fetch real-time rates, falling back to the configured flat fallback rate
+// if the carrier call fails or times out.
+model LiveCarrierRate {
+  id          String   @id @default(cuid())
+  zoneId      String
+  zone        Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  name        String   // internal reference name
+  notes       String?  @db.Text
+  status      String   @default("enabled") // "enabled" | "disabled"
+  carrierKey  String
+  shippingLocation String @default("shopify_location")
+  // JSON array of selected service codes, e.g. ["FEDEX_GROUND","FEDEX_2_DAY"]
+  services    String   @default("[]") @db.Text
+  packagingMethod      String @default("cart_attributes") // "cart_attributes" | "per_product" | "ai"
+  packageSplittingRule String @default("cart_quantity")
+  productFilter        String @default("all_products")
+  // JSON array of packages: [{ id, length, width, height, unit, maxWeight, weightUnit }]
+  packages    String   @default("[]") @db.Text
+  fallbackName        String  @default("Flat rate")
+  fallbackDescription String?
+  fallbackType         String  @default("fixed") // "fixed"
+  fallbackRate         Float   @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([zoneId])
 }

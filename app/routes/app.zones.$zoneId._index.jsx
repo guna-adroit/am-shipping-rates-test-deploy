@@ -5,6 +5,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getZone, updateZone, deleteZone, validateConditions } from "../models/zone.server";
 import { deleteRate } from "../models/rate.server";
+import { toggleLiveCarrierRateStatus, deleteLiveCarrierRate } from "../models/liveCarrierRate.server";
+import { getCarrier } from "../carriers/definitions";
 import db from "../db.server";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -190,6 +192,19 @@ export const action = async ({ request, params }) => {
         data:  { status: newStatus },
       });
     }
+    return { ok: true };
+  }
+
+  if (intent === "toggle-live-rate-status") {
+    const liveRateId = formData.get("liveRateId")?.toString();
+    const newStatus  = formData.get("newStatus")?.toString() ?? "enabled";
+    if (liveRateId) await toggleLiveCarrierRateStatus(liveRateId, newStatus);
+    return { ok: true };
+  }
+
+  if (intent === "delete-live-rate") {
+    const liveRateId = formData.get("liveRateId")?.toString();
+    if (liveRateId) await deleteLiveCarrierRate(liveRateId);
     return { ok: true };
   }
 
@@ -602,6 +617,55 @@ export default function EditScenarioPage() {
 
               {shippingProfiles.length === 0 && zone.rates.length === 0 && (
                 <s-paragraph>No shipping profiles or rates found.</s-paragraph>
+              )}
+            </s-stack>
+          </s-section>
+
+          {/* ── Live carrier rates ── */}
+          <s-section heading="Live carrier rates">
+            <s-stack direction="block" gap="base">
+              <s-link href={`/app/zones/${zone.id}/rates/new?rateType=live_carrier`}>Add live carrier rate</s-link>
+
+              {(zone.liveCarrierRates ?? []).length > 0 && (
+                <s-stack direction="block" gap="small">
+                  {zone.liveCarrierRates.map((liveRate) => {
+                    const carrier = getCarrier(liveRate.carrierKey);
+                    return (
+                      <div key={liveRate.id} style={{
+                        border: "1px solid #e1e3e5", borderRadius: "8px",
+                        padding: "12px 16px", display: "flex",
+                        alignItems: "center", justifyContent: "space-between",
+                      }}>
+                        <s-stack direction="block" gap="extra-small">
+                          <s-text>
+                            <strong>{liveRate.name}</strong>
+                            {" "}<span style={{ color: "#6d7175" }}>| {carrier?.label ?? liveRate.carrierKey}</span>
+                          </s-text>
+                          <s-text tone="subdued" style={{ fontSize: "12px" }}>
+                            Live carrier · Fallback: {liveRate.fallbackName} (${liveRate.fallbackRate.toFixed(2)})
+                          </s-text>
+                        </s-stack>
+                        <s-stack direction="inline" gap="small">
+                          <rateFetcher.Form method="post" style={{ display: "inline" }}>
+                            <input type="hidden" name="intent"     value="toggle-live-rate-status" />
+                            <input type="hidden" name="liveRateId" value={liveRate.id} />
+                            <input type="hidden" name="newStatus"  value={liveRate.status === "enabled" ? "disabled" : "enabled"} />
+                            <button type="submit" style={{ background:"none", border:"none", cursor:"pointer", padding:0 }}>
+                              <s-badge tone={liveRate.status === "enabled" ? "success" : "neutral"}>
+                                {liveRate.status === "enabled" ? "Active" : "Inactive"}
+                              </s-badge>
+                            </button>
+                          </rateFetcher.Form>
+                          <s-link href={`/app/zones/${zone.id}/live-rates/${liveRate.id}`}>Edit</s-link>
+                        </s-stack>
+                      </div>
+                    );
+                  })}
+                </s-stack>
+              )}
+
+              {(zone.liveCarrierRates ?? []).length === 0 && (
+                <s-paragraph>No live carrier rates yet.</s-paragraph>
               )}
             </s-stack>
           </s-section>
