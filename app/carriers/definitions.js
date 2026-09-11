@@ -106,9 +106,12 @@ export const CARRIERS = [
     },
     // Maps our generic service labels to real FedEx serviceType codes for the ones
     // we can actually request rates for via the sandbox Rate v1 API.
+    // Codes below are taken from actual FedEx sandbox Rate v1 responses.
     serviceCodeMap: {
       "Ground": "FEDEX_GROUND",
+      "Express Saver / Economy": "FEDEX_EXPRESS_SAVER",
       "2 Day": "FEDEX_2_DAY",
+      "2 Day AM": "FEDEX_2_DAY_AM",
       "Standard Overnight": "STANDARD_OVERNIGHT",
       "Priority Overnight": "PRIORITY_OVERNIGHT",
       "First Overnight": "FIRST_OVERNIGHT",

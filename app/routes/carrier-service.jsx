@@ -22,7 +22,10 @@ async function getShopOriginAddress(shopDomain) {
       where: { shop: shopDomain, isOnline: false },
       select: { accessToken: true },
     });
-    if (!session?.accessToken) return null;
+    if (!session?.accessToken) {
+      console.warn(`[carrier:live] No offline session token for ${shopDomain} — cannot resolve origin address`);
+      return null;
+    }
 
     const resp = await fetch(`https://${shopDomain}/admin/api/2024-01/graphql.json`, {
       method: "POST",
@@ -34,10 +37,16 @@ async function getShopOriginAddress(shopDomain) {
         query: `{ locations(first: 1) { edges { node { address { zip countryCode } } } } }`,
       }),
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      console.warn(`[carrier:live] Locations query failed: HTTP ${resp.status}`);
+      return null;
+    }
     const json = await resp.json();
     const address = json?.data?.locations?.edges?.[0]?.node?.address;
-    if (!address?.zip || !address?.countryCode) return null;
+    if (!address?.zip || !address?.countryCode) {
+      console.warn(`[carrier:live] Shop location has no zip/countryCode set — live rates need a complete origin address`);
+      return null;
+    }
     return { postalCode: address.zip, countryCode: address.countryCode };
   } catch (e) {
     console.error(`[carrier] Failed to fetch shop origin address: ${e.message}`);
@@ -56,6 +65,8 @@ async function resolveLiveCarrierRates(shopDomain, zone, cartData, currency) {
   const destinationZip = (cartData.destination?.postal_code ?? "").trim();
   const destinationCountry = cartData.destination?.country_code ?? "US";
   const weightLb = cartData.totalWeightKg * 2.20462;
+
+  console.log(`[carrier:live] origin=${origin ? `${origin.postalCode},${origin.countryCode}` : "null"} destination=${destinationZip},${destinationCountry} weightLb=${weightLb.toFixed(2)}`);
 
   for (const liveRate of zone.liveCarrierRates ?? []) {
     const carrier = getCarrier(liveRate.carrierKey);
@@ -77,10 +88,15 @@ async function resolveLiveCarrierRates(shopDomain, zone, cartData, currency) {
             weightLb,
             serviceCodes,
           });
+          console.log(`[carrier:live] ${liveRate.carrierKey}: ${quotes?.length ?? 0} quote(s) returned`);
+        } else {
+          console.warn(`[carrier:live] No saved credentials for carrier "${liveRate.carrierKey}" on ${shopDomain} — using fallback rate`);
         }
       } catch (e) {
-        console.error(`[carrier] Live rate fetch failed for ${liveRate.carrierKey}: ${e.message}`);
+        console.error(`[carrier:live] Live rate fetch failed for ${liveRate.carrierKey}: ${e.message}`);
       }
+    } else {
+      console.warn(`[carrier:live] Skipping live fetch for ${liveRate.carrierKey} — missing origin or destination zip`);
     }
 
     if (quotes && quotes.length > 0) {
@@ -257,14 +273,20 @@ export const action = async ({ request }) => {
   const { zones, isFallback } = result;
   console.log(`[carrier] ${zones.length} scenario(s) matched${isFallback ? " [FALLBACK]" : ""}: ${zones.map(z => `"${z.name}"`).join(", ")}`);
 
-  // 6. Collect ALL applicable rates from ALL matching scenarios.
-  //    When multiple scenarios match, return the HIGHEST-PRICED rate.
-  const allRates = [];
+  // 6. Collect applicable rates from ALL matching scenarios.
+  //    - Live carrier rates: return EVERY quoted/fallback rate as-is, so the
+  //      customer can choose between e.g. FedEx Ground / 2Day / Overnight.
+  //    - Fixed (tiered) rates: keep prior behaviour — when multiple scenarios/
+  //      tiers match, return only the single HIGHEST-PRICED one.
+  const liveRates  = [];
+  const fixedRates = [];
 
   for (const zone of zones) {
+    console.log(`[carrier] Zone "${zone.name}": ${zone.liveCarrierRates?.length ?? 0} live carrier rate(s), ${zone.rates?.length ?? 0} fixed rate(s)`);
+
     if (zone.liveCarrierRates?.length > 0) {
       const liveResults = await resolveLiveCarrierRates(shopDomain, zone, cartData, currency);
-      allRates.push(...liveResults);
+      liveRates.push(...liveResults);
     }
     for (const rate of zone.rates) {
       const val = rate.type === "weight" ? totalWeightKg : totalDollars;
@@ -287,7 +309,7 @@ export const action = async ({ request }) => {
       // Combine merchant description + delivery text (separated by space if both exist)
       const description = [rate.description, deliveryText].filter(Boolean).join(" · ");
 
-      allRates.push({
+      fixedRates.push({
         service_name:      rate.name,
         service_code:      `scenario_rate_${rate.id}`,
         total_price:       Math.round(dollarPrice * 100),
@@ -299,34 +321,35 @@ export const action = async ({ request }) => {
     }
   }
 
-  if (allRates.length === 0) {
+  if (liveRates.length === 0 && fixedRates.length === 0) {
     console.log("[carrier] No rates match the cart criteria");
     console.log(`[carrier] ✓ Total response time: ${Date.now() - t0}ms`);
     return Response.json({ rates: [] });
   }
 
-  // Pick the single highest-priced rate across all matching scenarios
-  const highestRate = allRates.reduce((best, r) =>
-    r.total_price > best.total_price ? r : best
-  );
+  // Pick the single highest-priced FIXED rate across all matching scenarios
+  // (unchanged legacy behaviour). Live carrier rates are never collapsed.
+  let selectedFixedRates = [];
+  if (fixedRates.length > 0) {
+    const highestFixed = fixedRates.reduce((best, r) => (r.total_price > best.total_price ? r : best));
+    console.log(
+      `[carrier] Highest fixed rate: "${highestFixed.service_name}" ` +
+      `$${(highestFixed.total_price / 100).toFixed(2)} (from scenario "${highestFixed.scenario}")`
+    );
+    selectedFixedRates = [highestFixed];
+  }
 
-  console.log(
-    `[carrier] Highest rate: "${highestRate.service_name}" ` +
-    `$${(highestRate.total_price / 100).toFixed(2)} ` +
-    `(from scenario "${highestRate.scenario}")`
-  );
-
-  const finalRates = [{
-    service_name:      highestRate.service_name,
-    service_code:      highestRate.service_code,
-    total_price:       highestRate.total_price.toString(),
-    description:       highestRate.description,
+  const finalRates = [...liveRates, ...selectedFixedRates].map((r) => ({
+    service_name:      r.service_name,
+    service_code:      r.service_code,
+    total_price:       Math.round(r.total_price).toString(),
+    description:       r.description,
     currency,
-    min_delivery_date: highestRate.min_delivery_date,
-    max_delivery_date: highestRate.max_delivery_date,
-  }];
-   
-  console.log(`[carrier] Returning ${finalRates.length} rate(s)`);
+    min_delivery_date: r.min_delivery_date,
+    max_delivery_date: r.max_delivery_date,
+  }));
+
+  console.log(`[carrier] Returning ${finalRates.length} rate(s): ${finalRates.map(r => `${r.service_name} ($${(Number(r.total_price) / 100).toFixed(2)})`).join(", ")}`);
   console.log(`[carrier] ✓ Total response time: ${Date.now() - t0}ms`);
   return Response.json({ rates: finalRates });
 };
