@@ -12,6 +12,19 @@ import { getCarrierCredential } from "../models/liveCarrierRate.server";
 import { getCarrier } from "../carriers/definitions";
 import { fetchRates as fetchLiveCarrierRates } from "../carriers/index.server";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TEMPORARY testing fallback — used only if the shop's location(s) and
+// store address both come back without a usable zip/country (e.g. while the
+// `read_locations` scope hasn't been accepted by the store yet). Lets you
+// confirm the FedEx live-rate call itself works end-to-end before the real
+// origin lookup is fixed. Remove this block once getShopOriginAddress()
+// reliably resolves a real origin.
+// ─────────────────────────────────────────────────────────────────────────────
+const TEMP_FALLBACK_ORIGIN = {
+  postalCode: process.env.LIVE_CARRIER_TEST_ORIGIN_ZIP || "02557",
+  countryCode: process.env.LIVE_CARRIER_TEST_ORIGIN_COUNTRY || "US",
+};
+
 /**
  * Resolves the "origin" address for live carrier rate requests.
  *
@@ -22,7 +35,8 @@ import { fetchRates as fetchLiveCarrierRates } from "../carriers/index.server";
  *      and has a complete address — this is the one checkout ships from.
  *   2) Any other location with a complete address, as a fallback.
  *   3) The shop's general Store details address (Settings → General —
- *      `shop.billingAddress`, the Admin API equivalent of the Liquid
+ *      `shop.shopAddress` (the Admin API's replacement for the now-
+ *      deprecated `shop.billingAddress`), the Admin API equivalent of the Liquid
  *      `shop.address` fields: https://shopify.dev/docs/api/liquid/objects/shop).
  *
  * NOTE: reading locations requires the `read_locations` access scope. If the
@@ -40,7 +54,7 @@ async function getShopOriginAddress(shopDomain) {
   }
 
   const graphql = async (query) => {
-    const resp = await fetch(`https://${shopDomain}/admin/api/2024-01/graphql.json`, {
+    const resp = await fetch(`https://${shopDomain}/admin/api/2026-07/graphql.json`, {
       method: "POST",
       headers: {
         "X-Shopify-Access-Token": session.accessToken,
@@ -99,13 +113,13 @@ async function getShopOriginAddress(shopDomain) {
 
   // ── 3) Settings → General store address, as its own independent request.
   try {
-    const { ok, json } = await graphql(`{ shop { billingAddress { zip countryCodeV2 } } }`);
+    const { ok, json } = await graphql(`{ shop { shopAddress { zip countryCodeV2 } } }`);
     if (!ok) {
       console.warn(`[carrier:live] Shop address query failed: HTTP request error`);
     } else if (json.errors) {
       console.warn(`[carrier:live] Shop address query errors: ${JSON.stringify(json.errors)}`);
     } else {
-      const shopAddress = json?.data?.shop?.billingAddress;
+      const shopAddress = json?.data?.shop?.shopAddress;
       if (shopAddress?.zip && shopAddress?.countryCodeV2) {
         console.log(`[carrier:live] Using shop store address as origin (fallback — no location has a complete address): ${shopAddress.zip}, ${shopAddress.countryCodeV2}`);
         return { postalCode: shopAddress.zip, countryCode: shopAddress.countryCodeV2 };
@@ -116,7 +130,8 @@ async function getShopOriginAddress(shopDomain) {
   }
 
   console.warn(`[carrier:live] No location or store address has a zip/country set — live rates need a complete origin address. Set one under Settings → Locations, or Settings → General → Store details.`);
-  return null;
+  console.warn(`[carrier:live] TEMP: using hardcoded testing origin ${TEMP_FALLBACK_ORIGIN.postalCode}, ${TEMP_FALLBACK_ORIGIN.countryCode} — remove TEMP_FALLBACK_ORIGIN in carrier-service.jsx once the real origin lookup works.`);
+  return TEMP_FALLBACK_ORIGIN;
 }
 
 /**
