@@ -24,81 +24,99 @@ import { fetchRates as fetchLiveCarrierRates } from "../carriers/index.server";
  *   3) The shop's general Store details address (Settings → General —
  *      `shop.billingAddress`, the Admin API equivalent of the Liquid
  *      `shop.address` fields: https://shopify.dev/docs/api/liquid/objects/shop).
+ *
+ * NOTE: reading locations requires the `read_locations` access scope. If the
+ * app was installed before that scope was added, this falls through to the
+ * store address and logs a reminder to reinstall / accept the updated scopes.
  */
 async function getShopOriginAddress(shopDomain) {
-  try {
-    const session = await db.session.findFirst({
-      where: { shop: shopDomain, isOnline: false },
-      select: { accessToken: true },
-    });
-    if (!session?.accessToken) {
-      console.warn(`[carrier:live] No offline session token for ${shopDomain} — cannot resolve origin address`);
-      return null;
-    }
+  const session = await db.session.findFirst({
+    where: { shop: shopDomain, isOnline: false },
+    select: { accessToken: true },
+  });
+  if (!session?.accessToken) {
+    console.warn(`[carrier:live] No offline session token for ${shopDomain} — cannot resolve origin address`);
+    return null;
+  }
 
+  const graphql = async (query) => {
     const resp = await fetch(`https://${shopDomain}/admin/api/2024-01/graphql.json`, {
       method: "POST",
       headers: {
         "X-Shopify-Access-Token": session.accessToken,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        query: `{
-          shop {
-            billingAddress { zip countryCodeV2 }
-          }
-          locations(first: 20) {
-            edges {
-              node {
-                name
-                isActive
-                fulfillsOnlineOrders
-                address { zip countryCode }
-              }
-            }
-          }
-        }`,
-      }),
+      body: JSON.stringify({ query }),
     });
-    if (!resp.ok) {
-      console.warn(`[carrier:live] Shop/location address query failed: HTTP ${resp.status}`);
-      return null;
-    }
-    const json = await resp.json();
-    if (json.errors) {
-      console.warn(`[carrier:live] Shop/location address query errors: ${JSON.stringify(json.errors)}`);
-    }
+    const json = await resp.json().catch(() => ({}));
+    return { ok: resp.ok, json };
+  };
 
-    const locations = (json?.data?.locations?.edges ?? []).map((e) => e.node);
-    const hasAddress = (loc) => loc?.address?.zip && loc?.address?.countryCode;
+  // ── 1) & 2): Locations — issued as its own request so an ACCESS_DENIED
+  // error here (missing `read_locations` scope) can't null out the shop query.
+  try {
+    const { ok, json } = await graphql(`{
+      locations(first: 20) {
+        edges {
+          node {
+            name
+            isActive
+            fulfillsOnlineOrders
+            address { zip countryCode }
+          }
+        }
+      }
+    }`);
 
-    // 1) The location that fulfills online orders, if it has a complete address.
-    const fulfillmentLocation = locations.find((loc) => loc.isActive && loc.fulfillsOnlineOrders && hasAddress(loc));
-    if (fulfillmentLocation) {
-      console.log(`[carrier:live] Using origin from location "${fulfillmentLocation.name}" (fulfills online orders): ${fulfillmentLocation.address.zip}, ${fulfillmentLocation.address.countryCode}`);
-      return { postalCode: fulfillmentLocation.address.zip, countryCode: fulfillmentLocation.address.countryCode };
+    if (!ok) {
+      console.warn(`[carrier:live] Locations query failed: HTTP request error`);
+    } else if (json.errors) {
+      const accessDenied = json.errors.some((e) => e.extensions?.code === "ACCESS_DENIED");
+      if (accessDenied) {
+        console.warn(`[carrier:live] Locations query denied — the app is missing the "read_locations" scope. Add it to shopify.app.toml, run "shopify app deploy", and have the store owner reinstall/accept the updated scopes.`);
+      } else {
+        console.warn(`[carrier:live] Locations query errors: ${JSON.stringify(json.errors)}`);
+      }
+    } else {
+      const locations = (json?.data?.locations?.edges ?? []).map((e) => e.node);
+      const hasAddress = (loc) => loc?.address?.zip && loc?.address?.countryCode;
+
+      const fulfillmentLocation = locations.find((loc) => loc.isActive && loc.fulfillsOnlineOrders && hasAddress(loc));
+      if (fulfillmentLocation) {
+        console.log(`[carrier:live] Using origin from location "${fulfillmentLocation.name}" (fulfills online orders): ${fulfillmentLocation.address.zip}, ${fulfillmentLocation.address.countryCode}`);
+        return { postalCode: fulfillmentLocation.address.zip, countryCode: fulfillmentLocation.address.countryCode };
+      }
+
+      const anyLocation = locations.find((loc) => loc.isActive && hasAddress(loc));
+      if (anyLocation) {
+        console.log(`[carrier:live] Using origin from location "${anyLocation.name}" (fallback — no location is flagged as fulfilling online orders): ${anyLocation.address.zip}, ${anyLocation.address.countryCode}`);
+        return { postalCode: anyLocation.address.zip, countryCode: anyLocation.address.countryCode };
+      }
     }
-
-    // 2) Any other active location with a complete address.
-    const anyLocation = locations.find((loc) => loc.isActive && hasAddress(loc));
-    if (anyLocation) {
-      console.log(`[carrier:live] Using origin from location "${anyLocation.name}" (fallback — no location is flagged as fulfilling online orders): ${anyLocation.address.zip}, ${anyLocation.address.countryCode}`);
-      return { postalCode: anyLocation.address.zip, countryCode: anyLocation.address.countryCode };
-    }
-
-    // 3) Settings → General store address.
-    const shopAddress = json?.data?.shop?.billingAddress;
-    if (shopAddress?.zip && shopAddress?.countryCodeV2) {
-      console.log(`[carrier:live] Using shop store address as origin (fallback — no location has a complete address): ${shopAddress.zip}, ${shopAddress.countryCodeV2}`);
-      return { postalCode: shopAddress.zip, countryCode: shopAddress.countryCodeV2 };
-    }
-
-    console.warn(`[carrier:live] No location or store address has a zip/country set — live rates need a complete origin address. Set one under Settings → Locations, or Settings → General → Store details.`);
-    return null;
   } catch (e) {
-    console.error(`[carrier] Failed to fetch shop origin address: ${e.message}`);
-    return null;
+    console.error(`[carrier:live] Locations query threw: ${e.message}`);
   }
+
+  // ── 3) Settings → General store address, as its own independent request.
+  try {
+    const { ok, json } = await graphql(`{ shop { billingAddress { zip countryCodeV2 } } }`);
+    if (!ok) {
+      console.warn(`[carrier:live] Shop address query failed: HTTP request error`);
+    } else if (json.errors) {
+      console.warn(`[carrier:live] Shop address query errors: ${JSON.stringify(json.errors)}`);
+    } else {
+      const shopAddress = json?.data?.shop?.billingAddress;
+      if (shopAddress?.zip && shopAddress?.countryCodeV2) {
+        console.log(`[carrier:live] Using shop store address as origin (fallback — no location has a complete address): ${shopAddress.zip}, ${shopAddress.countryCodeV2}`);
+        return { postalCode: shopAddress.zip, countryCode: shopAddress.countryCodeV2 };
+      }
+    }
+  } catch (e) {
+    console.error(`[carrier:live] Shop address query threw: ${e.message}`);
+  }
+
+  console.warn(`[carrier:live] No location or store address has a zip/country set — live rates need a complete origin address. Set one under Settings → Locations, or Settings → General → Store details.`);
+  return null;
 }
 
 /**
