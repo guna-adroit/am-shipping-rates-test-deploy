@@ -186,18 +186,20 @@ async function resolveLiveCarrierRates(shopDomain, zone, cartData, currency) {
           service_code: `live_${liveRate.carrierKey}_${q.serviceCode}`,
           total_price: Math.round(q.amount * 100),
           description: liveRate.notes || "",
+          currency: q.currency || currency,   // use FedEx's quoted currency, not the cart's
           scenario: zone.name,
           min_delivery_date: null,
           max_delivery_date: null,
         });
       }
     } else {
-      // No live quotes — use the configured fallback rate.
+      // No live quotes — use the configured fallback rate (in the store's currency).
       results.push({
         service_name: liveRate.fallbackName || liveRate.name,
         service_code: `live_${liveRate.carrierKey}_fallback_${liveRate.id}`,
         total_price: Math.round((liveRate.fallbackRate || 0) * 100),
         description: liveRate.fallbackDescription || "",
+        currency,
         scenario: zone.name,
         min_delivery_date: null,
         max_delivery_date: null,
@@ -424,7 +426,7 @@ export const action = async ({ request }) => {
     service_code:      r.service_code,
     total_price:       Math.round(r.total_price).toString(),
     description:       r.description,
-    currency,
+    currency:          r.currency || currency,
     min_delivery_date: r.min_delivery_date,
     max_delivery_date: r.max_delivery_date,
   }));
