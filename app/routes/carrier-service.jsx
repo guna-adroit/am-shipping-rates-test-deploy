@@ -144,9 +144,10 @@ async function resolveLiveCarrierRates(shopDomain, zone, cartData, currency) {
   const origin = await getShopOriginAddress(shopDomain);
   const destinationZip = (cartData.destination?.postal_code ?? "").trim();
   const destinationCountry = cartData.destination?.country_code ?? "US";
-  const weightLb = cartData.totalWeightKg * 2.20462;
+  const weightKg = cartData.totalWeightKg;
+  const weightLb = weightKg * 2.20462;
 
-  console.log(`[carrier:live] origin=${origin ? `${origin.postalCode},${origin.countryCode}` : "null"} destination=${destinationZip},${destinationCountry} weightLb=${weightLb.toFixed(2)}`);
+  console.log(`[carrier:live] origin=${origin ? `${origin.postalCode},${origin.countryCode}` : "null"} destination=${destinationZip},${destinationCountry} weightKg=${weightKg.toFixed(3)}`);
 
   for (const liveRate of zone.liveCarrierRates ?? []) {
     const carrier = getCarrier(liveRate.carrierKey);
@@ -155,6 +156,21 @@ async function resolveLiveCarrierRates(shopDomain, zone, cartData, currency) {
     const serviceCodes = (carrier?.serviceCodeMap && services.length > 0)
       ? services.map((s) => carrier.serviceCodeMap[s]).filter(Boolean)
       : undefined;
+
+    // Use the smallest configured package as the parcel dimensions, if any
+    // were set up on this live rate (Packing measurements → Add package).
+    let dimensions;
+    try {
+      const packages = JSON.parse(liveRate.packages || "[]");
+      const first = packages[0];
+      if (first) {
+        dimensions = {
+          length: Number(first.length) || undefined,
+          width:  Number(first.width)  || undefined,
+          height: Number(first.height) || undefined,
+        };
+      }
+    } catch { /* ignore */ }
 
     let quotes = null;
     if (origin && destinationZip) {
@@ -165,7 +181,9 @@ async function resolveLiveCarrierRates(shopDomain, zone, cartData, currency) {
           quotes = await fetchLiveCarrierRates(liveRate.carrierKey, credentials, {
             origin,
             destination: { postalCode: destinationZip, countryCode: destinationCountry },
+            weightKg,
             weightLb,
+            dimensions,
             serviceCodes,
           });
           console.log(`[carrier:live] ${liveRate.carrierKey}: ${quotes?.length ?? 0} quote(s) returned`);
@@ -186,10 +204,10 @@ async function resolveLiveCarrierRates(shopDomain, zone, cartData, currency) {
           service_code: `live_${liveRate.carrierKey}_${q.serviceCode}`,
           total_price: Math.round(q.amount * 100),
           description: liveRate.notes || "",
-          currency: q.currency || currency,   // use FedEx's quoted currency, not the cart's
+          currency: q.currency || currency,   // use the carrier's quoted currency, not the cart's
           scenario: zone.name,
-          min_delivery_date: null,
-          max_delivery_date: null,
+          min_delivery_date: q.deliveryDate ?? null,
+          max_delivery_date: q.deliveryDate ?? null,
         });
       }
     } else {

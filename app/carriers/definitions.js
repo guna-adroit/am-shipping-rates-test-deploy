@@ -7,8 +7,8 @@
 //   - credentialFields   → shown inside the Sync modal
 //   - services.domestic / services.international → checkbox lists
 //
-// Only FedEx currently has a working live-rate implementation
-// (see app/carriers/fedex.server.js) using the sandbox OAuth + Rate v1 API.
+// Only FedEx and Canada Post currently have working live-rate implementations
+// (see app/carriers/fedex.server.js and app/carriers/canadapost.server.js).
 // The others are wired up end-to-end for credential storage, syncing, and
 // service selection, but `fetchRates()` for them returns `null` so checkout
 // falls back to the merchant's configured flat fallback rate until their
@@ -21,10 +21,10 @@ export const CARRIERS = [
     label: "Canada Post",
     guideUrl: "https://www.canadapost-postescanada.ca/cpc/en/business/developers.page",
     credentialFields: [
-      { name: "apiUsername",   label: "API Username",             type: "text" },
-      { name: "apiPassword",   label: "API Password",             type: "password" },
-      { name: "customerNumber",label: "Customer Number",          type: "text" },
-      { name: "contractId",    label: "Contract Id (Optional)",   type: "text", optional: true,
+      { name: "clientId",     label: "Client Id (X-IBM-Client-Id)",     type: "text" },
+      { name: "clientSecret", label: "Client Secret (X-IBM-Client-Secret)", type: "password" },
+      { name: "customerNumber", label: "Customer Number",               type: "text" },
+      { name: "contractId",  label: "Contract Id (Optional)",           type: "text", optional: true,
         helpText: "Only for commercial customers of Canada Post." },
     ],
     services: {
@@ -41,6 +41,18 @@ export const CARRIERS = [
         "Priority Worldwide parcel Int'l", "Small Packet International Air",
         "Small Packet International Surface", "Tracked Packet – International",
       ],
+    },
+    // Maps our generic service labels to real Canada Post Rating API service
+    // codes (see app/carriers/canadapost.server.js). Codes are Canada Post's
+    // published domestic service codes — double check against your contract,
+    // since not every code is enabled on every account.
+    serviceCodeMap: {
+      "Regular Parcel":        "DOM.RP",
+      "Expedited Parcel":      "DOM.EP",
+      "Xpresspost":            "DOM.XP",
+      "Xpresspost Certified":  "DOM.XP.CERT",
+      "Priority":              "DOM.PC",
+      "Library Materials":     "DOM.LIB",
     },
   },
   {
