@@ -21,8 +21,8 @@ import { fetchRates as fetchLiveCarrierRates } from "../carriers/index.server";
 // reliably resolves a real origin.
 // ─────────────────────────────────────────────────────────────────────────────
 const TEMP_FALLBACK_ORIGIN = {
-  postalCode: process.env.LIVE_CARRIER_TEST_ORIGIN_ZIP || "02557",
-  countryCode: process.env.LIVE_CARRIER_TEST_ORIGIN_COUNTRY || "US",
+  postalCode: process.env.LIVE_CARRIER_TEST_ORIGIN_ZIP || "T1P0C4",
+  countryCode: process.env.LIVE_CARRIER_TEST_ORIGIN_COUNTRY || "CA",
 };
 
 /**
