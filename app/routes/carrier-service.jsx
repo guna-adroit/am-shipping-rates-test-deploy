@@ -21,8 +21,8 @@ import { fetchRates as fetchLiveCarrierRates } from "../carriers/index.server";
 // reliably resolves a real origin.
 // ─────────────────────────────────────────────────────────────────────────────
 const TEMP_FALLBACK_ORIGIN = {
-  postalCode: process.env.LIVE_CARRIER_TEST_ORIGIN_ZIP || "T1P0C4",
-  countryCode: process.env.LIVE_CARRIER_TEST_ORIGIN_COUNTRY || "CA",
+  postalCode: process.env.LIVE_CARRIER_TEST_ORIGIN_ZIP || "02557",
+  countryCode: process.env.LIVE_CARRIER_TEST_ORIGIN_COUNTRY || "US",
 };
 
 /**
@@ -143,7 +143,13 @@ async function resolveLiveCarrierRates(shopDomain, zone, cartData, currency) {
   const results = [];
   const origin = await getShopOriginAddress(shopDomain);
   const destinationZip = (cartData.destination?.postal_code ?? "").trim();
-  const destinationCountry = cartData.destination?.country_code ?? "US";
+  // Shopify's carrier-service payload uses `country` (a 2-letter code, e.g. "CA"),
+  // NOT `country_code` — that field doesn't exist on the request at all, so reading
+  // it silently fell back to "US" on every single request regardless of the
+  // customer's actual address. That's why Canada Post rates were always taking the
+  // "international" branch (wrong destination shape) instead of "domestic", and
+  // always returning the same quote no matter which address was entered.
+  const destinationCountry = cartData.destination?.country ?? "US";
   const weightKg = cartData.totalWeightKg;
   const weightLb = weightKg * 2.20462;
 
