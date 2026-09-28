@@ -1,10 +1,11 @@
 import { getCarrier } from "./definitions";
 import { testFedexCredentials, fetchFedexRates } from "./fedex.server";
 import { testCanadaPostCredentials, fetchCanadaPostRates } from "./canadapost.server";
+import { testAusPostCredentials, fetchAusPostRates } from "./auspost-calc.server";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // testCredentials — called by the "Sync" button in the credentials modal.
-// FedEx and Canada Post do a real live check (OAuth token request) right now.
+// FedEx, Canada Post, and Australia Post PAC do a real live check right now.
 // Other carriers just confirm the required fields were filled in, are marked
 // "unverified" in the DB, and will use the fallback rate at checkout until
 // their live-rate APIs are wired up.
@@ -30,6 +31,11 @@ export async function testCredentials(carrierKey, credentials) {
     return { verified: true };
   }
 
+  if (carrierKey === "auspost_calc") {
+    await testAusPostCredentials(credentials);
+    return { verified: true };
+  }
+
   // No live verification implemented for this carrier yet.
   return { verified: false };
 }
@@ -45,6 +51,9 @@ export async function fetchRates(carrierKey, credentials, params) {
   }
   if (carrierKey === "canada_post") {
     return fetchCanadaPostRates(credentials, params);
+  }
+  if (carrierKey === "auspost_calc") {
+    return fetchAusPostRates(credentials, params);
   }
   return null;
 }

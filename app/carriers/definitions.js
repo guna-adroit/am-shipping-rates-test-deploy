@@ -7,12 +7,13 @@
 //   - credentialFields   → shown inside the Sync modal
 //   - services.domestic / services.international → checkbox lists
 //
-// Only FedEx and Canada Post currently have working live-rate implementations
-// (see app/carriers/fedex.server.js and app/carriers/canadapost.server.js).
-// The others are wired up end-to-end for credential storage, syncing, and
-// service selection, but `fetchRates()` for them returns `null` so checkout
-// falls back to the merchant's configured flat fallback rate until their
-// real rate APIs are implemented — see app/carriers/index.server.js.
+// Only FedEx, Canada Post, and Australia Post Postage Assessment Calculator
+// currently have working live-rate implementations (see fedex.server.js,
+// canadapost.server.js, auspost-calc.server.js). The others are wired up
+// end-to-end for credential storage, syncing, and service selection, but
+// `fetchRates()` for them returns `null` so checkout falls back to the
+// merchant's configured flat fallback rate until their real rate APIs are
+// implemented — see app/carriers/index.server.js.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const CARRIERS = [
@@ -201,13 +202,23 @@ export const CARRIERS = [
   {
     key: "auspost_calc",
     label: "Australia POST Postage Assessment Calculator",
-    guideUrl: "https://developers.auspost.com.au",
+    guideUrl: "https://developers.auspost.com.au/apis/pac/spec",
     credentialFields: [
       { name: "apiKey", label: "Australia POST Postage Assessment Calculator API Key", type: "password" },
     ],
     services: {
       domestic: ["Parcel Post", "Express Post"],
       international: ["International Standard", "International Express"],
+    },
+    // Maps our generic service labels to real Australia Post PAC service
+    // codes (see app/carriers/auspost-calc.server.js). Double check these against
+    // what your account actually returns — PAC service availability can
+    // differ by account/contract, same as Canada Post's codes.
+    serviceCodeMap: {
+      "Parcel Post":            "AUS_PARCEL_REGULAR",
+      "Express Post":           "AUS_PARCEL_EXPRESS",
+      "International Standard": "INT_PARCEL_STD_OWN_PACKAGING",
+      "International Express":  "INT_PARCEL_EXP_OWN_PACKAGING",
     },
   },
   {
